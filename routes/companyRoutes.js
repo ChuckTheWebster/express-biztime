@@ -95,8 +95,8 @@ router.delete("/:code", async function (req, res, next) {
 
 // helper functions
 
-/** Returns a company object after querying the database for a code.
- *  Throws a 404 not found error if nothing in database with code.
+/** Returns a company object after querying the database for a company with input code.
+ * Throws a 404 not found error if no associated company in database with input code.
  */
 async function getCompany(code) {
   const result = await db.query(
