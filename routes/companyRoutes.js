@@ -4,7 +4,10 @@ const express = require("express");
 
 const db = require("../db");
 const { BadRequestError, NotFoundError } = require("../expressError");
+const { getCompany, getCompanyByName } = require("../helpers");
 const router = express.Router();
+
+const MISSING_INFO_ERROR_MSG = "Invalid or missing information.";
 
 /** Returns list of companies.
  * Like {companies: [{code, name}, ...]} */
@@ -17,7 +20,7 @@ router.get("/", async function (req, res, next) {
 
   const companies = results.rows;
 
-  return res.json({ companies: companies });
+  return res.json({ companies });
 });
 
 /** Return obj of company: {company: {code, name, description}}
@@ -27,7 +30,11 @@ router.get("/:code", async function (req, res, next) {
   const code = req.params.code;
   const company = await getCompany(code);
 
-  return res.json({ company: company });
+  if (!company) {
+    throw new NotFoundError(`No company associated with code: ${code}`);
+  }
+
+  return res.json({ company });
 });
 
 /** Adds a company.
@@ -38,16 +45,33 @@ router.get("/:code", async function (req, res, next) {
 router.post("/", async function (req, res, next) {
   if (req.body === undefined) throw new BadRequestError();
   const { code, name, description } = req.body;
-  const result = await db.query(
-    `INSERT INTO companies (code, name, description)
-      VALUES ($1, $2, $3)
-      RETURNING code, name, description`,
-    [code, name, description]
-  );
 
-  const company = result.rows[0];
+  if (await getCompany(code)) {
+    throw new BadRequestError(`A company with code: ${code} already exists.`);
+  }
 
-  return res.json({ company: company });
+  if (await getCompanyByName(name)) {
+    throw new BadRequestError(`A company with name: ${name} already exists.`);
+  }
+
+  let company;
+  if (code && name && description) {
+    const result = await db.query(
+      `INSERT INTO companies (code, name, description)
+        VALUES ($1, $2, $3)
+        RETURNING code, name, description`,
+      [code, name, description]
+    );
+    company = result.rows[0];
+  } else {
+    throw new BadRequestError(MISSING_INFO_ERROR_MSG);
+  }
+
+  if (!company) {
+    throw new NotFoundError(`No company associated with code: ${code}`);
+  }
+
+  return res.status(201).json({ company });
 });
 
 /** Edit existing company.
@@ -61,8 +85,6 @@ router.put("/:code", async function (req, res, next) {
   const { name, description } = req.body;
 
   const code = req.params.code;
-  // 404 guard clause - maybe change?
-  await getCompany(code);
 
   const result = await db.query(
     `UPDATE companies
@@ -74,8 +96,11 @@ router.put("/:code", async function (req, res, next) {
   );
 
   const company = result.rows[0];
+  if (!company) {
+    throw new NotFoundError(`No company associated with code: ${code}`);
+  }
 
-  return res.json({ company: company });
+  return res.json({ company });
 });
 
 /** Deletes company.
@@ -85,34 +110,17 @@ router.put("/:code", async function (req, res, next) {
 
 router.delete("/:code", async function (req, res, next) {
   const code = req.params.code;
-  // 404 guard clause - maybe change?
-  await getCompany(code);
 
-  await db.query("DELETE FROM companies WHERE code = $1", [code]);
+  const result = await db.query(
+    "DELETE FROM companies WHERE code = $1 RETURNING code",
+    [code]
+  );
+  const company = result.rows[0];
+  if (!company) {
+    throw new NotFoundError(`No company associated with code: ${code}`);
+  }
 
   return res.json({ status: "deleted" });
 });
-
-// helper functions
-
-/** Returns a company object after querying the database for a company with input code.
- * Throws a 404 not found error if no associated company in database with input code.
- */
-async function getCompany(code) {
-  const result = await db.query(
-    `SELECT code, name, description
-      FROM companies
-      WHERE code = $1`,
-    [code]
-  );
-
-  const company = result.rows[0];
-
-  if (company) {
-    return company;
-  } else {
-    throw new NotFoundError();
-  }
-}
 
 module.exports = router;
